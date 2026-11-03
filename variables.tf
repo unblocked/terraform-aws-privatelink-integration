@@ -51,6 +51,27 @@ variable "allowed_principals" {
   }
 }
 
+variable "verification_external_id" {
+  description = "External ID Unblocked shows on its PrivateLink setup page. The verification role requires it, so only your Unblocked organization can assume the role."
+  type        = string
+
+  validation {
+    condition     = can(regex("^unblocked_privatelink_[0-9a-f]{32}$", var.verification_external_id))
+    error_message = "verification_external_id must be the value Unblocked shows: unblocked_privatelink_ followed by 32 hexadecimal characters."
+  }
+}
+
+variable "verification_role_name" {
+  description = "Name of the role Unblocked assumes to verify that you own the endpoint service. It must start with UnblockedPrivateLink."
+  type        = string
+  default     = "UnblockedPrivateLinkVerification"
+
+  validation {
+    condition     = can(regex("^UnblockedPrivateLink[A-Za-z0-9+=,.@_-]{0,44}$", var.verification_role_name))
+    error_message = "verification_role_name must start with UnblockedPrivateLink and be at most 64 characters of letters, digits and +=,.@_-."
+  }
+}
+
 variable "unblocked_region" {
   description = "Region Unblocked connects from. When it differs from this provider's region, the service is offered to it cross-region."
   type        = string

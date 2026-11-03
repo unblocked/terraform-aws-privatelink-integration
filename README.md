@@ -9,7 +9,7 @@ This module offers a database or other TCP service in your VPC to Unblocked thro
 | Terraform | `>= 1.5.0` |
 | AWS provider | `>= 6.0.0` |
 
-The identity applying this module must be allowed to describe the VPC, manage security groups and their rules, create Network Load Balancers, target groups and listeners, and manage VPC endpoint services and their permissions.
+The identity applying this module must be allowed to describe the VPC, manage security groups and their rules, create Network Load Balancers, target groups and listeners, manage VPC endpoint services and their permissions, and create an IAM role with an inline policy.
 
 ## Providers
 
@@ -35,10 +35,11 @@ module "unblocked_privatelink" {
   allowed_principals = [
     "arn:aws:iam::UNBLOCKED_AWS_ACCOUNT_ID:role/UNBLOCKED_ENDPOINT_MANAGER_ROLE_NAME",
   ]
+  verification_external_id = "UNBLOCKED_PRIVATELINK_EXTERNAL_ID"
 }
 ```
 
-`allowed_principals` has no default. Unblocked gives you the role ARN, and it stays visible in your Terraform configuration as the only identity that can connect.
+`allowed_principals` and `verification_external_id` have no defaults. Unblocked gives you the role ARN and shows your organization's external ID on its PrivateLink setup page, and both stay visible in your Terraform configuration.
 
 Then register the target IPs, as described in [Finding the target IPs](#finding-the-target-ips):
 
@@ -58,11 +59,13 @@ If your database's security group is managed with inline `ingress` blocks on an 
 | `vpc_id` | VPC of the database. | `string` | n/a | yes |
 | `subnet_ids` | Private subnets for the NLB, one per Availability Zone. The endpoint service is offered in exactly these AZs. | `list(string)` | n/a | yes |
 | `allowed_principals` | Non-empty list of IAM role ARNs allowed to create endpoints to the service: the endpoint-manager role Unblocked gives you. | `list(string)` | n/a | yes |
+| `verification_external_id` | External ID shown on Unblocked's PrivateLink setup page: `unblocked_privatelink_` and 32 hexadecimal characters. The verification role requires it. | `string` | n/a | yes |
 | `port` | Port the database listens on, and the port the NLB exposes. | `number` | `5432` | no |
 | `database_security_group_id` | Security group of the database. When set, the NLB may reach only this group on the port, and the module adds an inbound rule to it admitting the NLB. | `string` | `null` | no |
 | `target_cidr_blocks` | CIDR blocks the NLB may reach on the port when `database_security_group_id` is unset. Empty means the VPC's primary CIDR block. | `list(string)` | `[]` | no |
 | `unblocked_region` | Region Unblocked connects from. Added to the service's supported regions when it differs from the provider's region. | `string` | `"us-west-2"` | no |
 | `auto_accept_connections` | Accept endpoint connections from the allowed principals automatically. When `false`, you accept each connection before traffic flows. | `bool` | `false` | no |
+| `verification_role_name` | Name of the role Unblocked assumes to verify that you own the endpoint service. Must start with `UnblockedPrivateLink`. | `string` | `"UnblockedPrivateLinkVerification"` | no |
 | `tags` | Tags for every resource. | `map(string)` | `{}` | no |
 
 ## Outputs
@@ -76,6 +79,7 @@ If your database's security group is managed with inline `ingress` blocks on an 
 | `target_group_arn` | Target group to register and maintain the target IPs in. |
 | `nlb_security_group_id` | Security group of the NLB. |
 | `nlb_arn` | ARN of the NLB behind the endpoint service. |
+| `verification_role_arn` | Verification role ARN, to provide to Unblocked. |
 
 ## Integration output
 
@@ -97,6 +101,11 @@ output "unblocked_port" {
   description = "Port to provide to Unblocked."
 }
 
+output "unblocked_verification_role_arn" {
+  value       = module.unblocked_privatelink.verification_role_arn
+  description = "Verification role ARN to provide to Unblocked."
+}
+
 output "unblocked_target_group_arn" {
   value       = module.unblocked_privatelink.target_group_arn
   description = "Target group to register the target IPs in."
@@ -109,6 +118,7 @@ After applying, retrieve them with:
 terraform output -raw unblocked_endpoint_service_name
 terraform output -raw unblocked_owner_account_id
 terraform output -raw unblocked_port
+terraform output -raw unblocked_verification_role_arn
 ```
 
 ## Resources created
@@ -122,10 +132,12 @@ Depending on the inputs, the module creates:
 - When `database_security_group_id` is set, an inbound rule on that group admitting the NLB on `port`.
 - A VPC endpoint service on the NLB, with no private DNS name, supported in the provider's region and `unblocked_region`.
 - One allowed-principal entry per role in `allowed_principals`.
+- A verification role named `verification_role_name` that only the roles in `allowed_principals` can assume, and only with `verification_external_id`. Its inline policy allows `ec2:DescribeVpcEndpointServiceConfigurations` and `iam:GetRole` on itself, nothing else.
 
 ## Security model
 
 - The NLB's security group has no inbound rules, and its rules are not evaluated for PrivateLink traffic, so the NLB only takes connections through the endpoint service.
+- Every Unblocked customer allows the same Unblocked role, so before creating an endpoint Unblocked assumes the verification role with your organization's external ID. It checks that the role requires exactly that ID and that it sees the endpoint service from inside your account. Another Unblocked organization cannot pass this check, so it cannot connect to your service even if it knows the service name.
 - Only the roles in `allowed_principals` can create an endpoint to the service. With `auto_accept_connections = false`, each endpoint also needs your acceptance before traffic flows.
 - Outbound, the NLB reaches only `port`, on the database's security group or the configured CIDRs.
 - Unblocked reaches only the targets you register. There is no VPC peering, no route into your VPC and no internet exposure.
@@ -158,7 +170,7 @@ The target group does not track its targets in Terraform state, so these changes
 ## Connecting Unblocked
 
 1. **Apply the module and register the targets.**
-2. **Give Unblocked** the endpoint service name, your AWS account ID, the region, the port and the database hostname. Unblocked verifies the database's TLS certificate against that hostname, so give the RDS endpoint name (for Aurora, the cluster reader endpoint), not an IP address or a custom DNS name.
+2. **Give Unblocked** the endpoint service name, your AWS account ID, the verification role ARN, the region, the port and the database hostname. Unblocked verifies the database's TLS certificate against that hostname, so give the RDS endpoint name (for Aurora, the cluster reader endpoint), not an IP address or a custom DNS name.
 3. **Accept the connection**, unless `auto_accept_connections` is on. Unblocked's endpoint waits in `pendingAcceptance`. Check that its owner is the account in your `allowed_principals` role ARN (`UNBLOCKED_AWS_ACCOUNT_ID`), then accept it:
 
    ```bash

@@ -115,3 +115,51 @@ resource "aws_vpc_endpoint_service_allowed_principal" "this" {
   vpc_endpoint_service_id = aws_vpc_endpoint_service.this.id
   principal_arn           = each.value
 }
+
+data "aws_partition" "current" {}
+
+data "aws_iam_policy_document" "verification_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "AWS"
+      identifiers = var.allowed_principals
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "sts:ExternalId"
+      values   = [var.verification_external_id]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "verification" {
+  statement {
+    sid       = "DescribeEndpointServices"
+    actions   = ["ec2:DescribeVpcEndpointServiceConfigurations"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadOwnTrustPolicy"
+    actions   = ["iam:GetRole"]
+    resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${var.verification_role_name}"]
+  }
+}
+
+resource "aws_iam_role" "verification" {
+  name                 = var.verification_role_name
+  description          = "Lets Unblocked verify that this account owns the ${var.name} endpoint service"
+  assume_role_policy   = data.aws_iam_policy_document.verification_assume.json
+  max_session_duration = 3600
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy" "verification" {
+  name   = "verify-endpoint-service"
+  role   = aws_iam_role.verification.id
+  policy = data.aws_iam_policy_document.verification.json
+}

@@ -32,3 +32,8 @@ output "nlb_arn" {
   description = "ARN of the NLB behind the endpoint service."
   value       = aws_lb.this.arn
 }
+
+output "verification_role_arn" {
+  description = "ARN of the role Unblocked assumes to verify that you own the endpoint service, to give Unblocked."
+  value       = aws_iam_role.verification.arn
+}
