@@ -42,9 +42,8 @@ variable "target_cidr_blocks" {
 }
 
 variable "allowed_principals" {
-  description = "IAM principal ARNs allowed to create endpoints to the service: Unblocked's endpoint-manager role."
+  description = "IAM role ARNs allowed to create endpoints to the service: the endpoint-manager role Unblocked gives you."
   type        = list(string)
-  default     = ["arn:aws:iam::029574882031:role/ExternalConnectionsEndpointManager"]
 
   validation {
     condition     = length(var.allowed_principals) > 0 && alltrue([for p in var.allowed_principals : can(regex("^arn:aws[a-z-]*:iam::[0-9]{12}:role/.+$", p))])

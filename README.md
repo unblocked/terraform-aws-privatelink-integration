@@ -1,32 +1,23 @@
 # Terraform AWS PrivateLink integration
 
-Offers a PostgreSQL database in your VPC to Unblocked through an AWS PrivateLink endpoint
-service. Unblocked reaches only the targets you register, through an endpoint you approve.
-There is no peering, no internet exposure and no route into your VPC.
+This module offers a database or other TCP service in your VPC to Unblocked through an AWS PrivateLink endpoint service. Unblocked reaches only the targets you register, through an endpoint created by the IAM role you allow. There is no peering, no internet exposure and no route into your VPC.
 
-This module is the Terraform form of the console and CLI steps in Unblocked's PrivateLink
-setup guide.
+## Requirements
 
-## What it creates
+| Name | Version |
+| --- | --- |
+| Terraform | `>= 1.5.0` |
+| AWS provider | `>= 6.0.0` |
 
-- An internal **Network Load Balancer** in the subnets you choose, listening on the database
-  port, with cross-zone load balancing on.
-- A **TCP target group** of IP targets, with a TCP health check every 10 seconds and a
-  30-second deregistration delay.
-- A **security group** on the NLB. It has no inbound rules and is not applied to PrivateLink
-  traffic, so the NLB only takes connections through the endpoint service. Outbound, it
-  reaches only the database port.
-- With `database_security_group_id` set, an **inbound rule** on your database's security
-  group admitting the NLB on the port.
-- A **VPC endpoint service** on the NLB, with no private DNS name. By default you accept each
-  connection; set `auto_accept_connections = true` to accept connections from the allowed
-  principals automatically.
-- An **allowed principal** entry for Unblocked's endpoint-manager role.
+The identity applying this module must be allowed to describe the VPC, manage security groups and their rules, create Network Load Balancers, target groups and listeners, and manage VPC endpoint services and their permissions.
 
-The target group starts empty. You register the database IPs in it and keep them current
-outside Terraform, because they change after failovers and AWS maintenance. The target group
-does not track its targets in Terraform state, so these changes cause no drift. See
-[Keeping the target IPs current](#keeping-the-target-ips-current).
+## Providers
+
+| Name | Source | Version |
+| --- | --- | --- |
+| `aws` | `hashicorp/aws` | `>= 6.0.0` |
+
+The module inherits the caller's AWS provider configuration. It does not configure credentials or a provider alias. Resources are created in the provider's region.
 
 ## Usage
 
@@ -38,58 +29,111 @@ module "unblocked_privatelink" {
 
   name                       = "unblocked-privatelink"
   vpc_id                     = "vpc-0123456789abcdef0"
-  subnet_ids                 = ["subnet-aaa", "subnet-bbb"]
+  subnet_ids                 = ["subnet-0123456789abcdef0", "subnet-0fedcba9876543210"]
   database_security_group_id = "sg-0123456789abcdef0"
+
+  allowed_principals = [
+    "arn:aws:iam::UNBLOCKED_AWS_ACCOUNT_ID:role/UNBLOCKED_ENDPOINT_MANAGER_ROLE_NAME",
+  ]
 }
 ```
 
-Then register the database IPs, as described in [Finding the target IPs](#finding-the-target-ips):
+`allowed_principals` has no default. Unblocked gives you the role ARN, and it stays visible in your Terraform configuration as the only identity that can connect.
+
+Then register the target IPs, as described in [Finding the target IPs](#finding-the-target-ips):
 
 ```bash
 aws elbv2 register-targets \
-  --target-group-arn "$(terraform output -raw target_group_arn)" \
+  --target-group-arn "$(terraform output -raw unblocked_target_group_arn)" \
   --targets Id=10.0.1.25,Port=5432 Id=10.0.2.31,Port=5432
 ```
 
-If your database's security group is managed with inline `ingress` blocks on an
-`aws_security_group` resource, leave `database_security_group_id` unset: Terraform would
-remove the module's rule on the next apply of that resource. Instead, allow
-`nlb_security_group_id` on the port in your own configuration. The NLB can then reach the VPC
-CIDR on the port, or the CIDRs in `target_cidr_blocks`.
+If your database's security group is managed with inline `ingress` blocks on an `aws_security_group` resource, leave `database_security_group_id` unset: Terraform would remove the module's rule on the next apply of that resource. Instead, allow `nlb_security_group_id` on the port in your own configuration. The NLB can then reach the VPC CIDR on the port, or the CIDRs in `target_cidr_blocks`.
 
 ## Inputs
 
-| Name | Default | Description |
-|------|---------|-------------|
-| `name` | | Name prefix for every resource, 2–32 characters. |
-| `vpc_id` | | VPC of the database. |
-| `subnet_ids` | | Private subnets for the NLB, one per AZ. The service is offered in exactly these AZs. |
-| `port` | `5432` | Database port, also exposed by the NLB. |
-| `database_security_group_id` | `null` | Your database's security group. The NLB may reach only it, and the module adds the inbound rule. |
-| `target_cidr_blocks` | VPC CIDR | Where the NLB may send traffic when `database_security_group_id` is unset. |
-| `allowed_principals` | Unblocked's role | IAM role ARNs allowed to create endpoints. |
-| `unblocked_region` | `us-west-2` | Region Unblocked connects from. Added to the service's supported regions. |
-| `auto_accept_connections` | `false` | Accept connections from allowed principals automatically. Leave off to approve each one. |
-| `tags` | `{}` | Tags for every resource. |
+| Name | Description | Type | Default | Required |
+| --- | --- | --- | --- | --- |
+| `name` | Name prefix for every resource, 2–32 characters of letters, digits and hyphens. The NLB and target group take it as their name. | `string` | n/a | yes |
+| `vpc_id` | VPC of the database. | `string` | n/a | yes |
+| `subnet_ids` | Private subnets for the NLB, one per Availability Zone. The endpoint service is offered in exactly these AZs. | `list(string)` | n/a | yes |
+| `allowed_principals` | Non-empty list of IAM role ARNs allowed to create endpoints to the service: the endpoint-manager role Unblocked gives you. | `list(string)` | n/a | yes |
+| `port` | Port the database listens on, and the port the NLB exposes. | `number` | `5432` | no |
+| `database_security_group_id` | Security group of the database. When set, the NLB may reach only this group on the port, and the module adds an inbound rule to it admitting the NLB. | `string` | `null` | no |
+| `target_cidr_blocks` | CIDR blocks the NLB may reach on the port when `database_security_group_id` is unset. Empty means the VPC's primary CIDR block. | `list(string)` | `[]` | no |
+| `unblocked_region` | Region Unblocked connects from. Added to the service's supported regions when it differs from the provider's region. | `string` | `"us-west-2"` | no |
+| `auto_accept_connections` | Accept endpoint connections from the allowed principals automatically. When `false`, you accept each connection before traffic flows. | `bool` | `false` | no |
+| `tags` | Tags for every resource. | `map(string)` | `{}` | no |
 
 ## Outputs
 
 | Name | Description |
-|------|-------------|
-| `endpoint_service_name` | Give this to Unblocked. |
-| `owner_account_id` | Give this to Unblocked. |
-| `port` | Give this to Unblocked. |
-| `endpoint_service_id` | For accepting or rejecting connections. |
-| `nlb_security_group_id` | The NLB's security group. |
-| `target_group_arn` | Register and maintain the database IPs in this target group. |
-| `nlb_arn` | For operations. |
+| --- | --- |
+| `endpoint_service_name` | Endpoint service name to provide to Unblocked. |
+| `owner_account_id` | AWS account ID that owns the endpoint service, to provide to Unblocked. |
+| `port` | Port the endpoint service exposes, to provide to Unblocked. |
+| `endpoint_service_id` | Endpoint service ID, for accepting or rejecting connections. |
+| `target_group_arn` | Target group to register and maintain the target IPs in. |
+| `nlb_security_group_id` | Security group of the NLB. |
+| `nlb_arn` | ARN of the NLB behind the endpoint service. |
 
-Requires Terraform 1.5 or later and AWS provider 6.0 or later.
+## Integration output
+
+Terraform does not automatically promote a child module's outputs to the root module. Re-export the values Unblocked needs, and the target group for registering targets, from your configuration:
+
+```hcl
+output "unblocked_endpoint_service_name" {
+  value       = module.unblocked_privatelink.endpoint_service_name
+  description = "Endpoint service name to provide to Unblocked."
+}
+
+output "unblocked_owner_account_id" {
+  value       = module.unblocked_privatelink.owner_account_id
+  description = "AWS account ID to provide to Unblocked."
+}
+
+output "unblocked_port" {
+  value       = module.unblocked_privatelink.port
+  description = "Port to provide to Unblocked."
+}
+
+output "unblocked_target_group_arn" {
+  value       = module.unblocked_privatelink.target_group_arn
+  description = "Target group to register the target IPs in."
+}
+```
+
+After applying, retrieve them with:
+
+```shell
+terraform output -raw unblocked_endpoint_service_name
+terraform output -raw unblocked_owner_account_id
+terraform output -raw unblocked_port
+```
+
+## Resources created
+
+Depending on the inputs, the module creates:
+
+- An internal Network Load Balancer in `subnet_ids`, listening on `port`, with cross-zone load balancing on.
+- A TCP target group of IP targets, with a TCP health check every 10 seconds and a 30-second deregistration delay. It starts empty.
+- A TCP listener forwarding `port` to the target group.
+- A security group on the NLB, with one outbound rule on `port`: to `database_security_group_id` when set, otherwise to each of `target_cidr_blocks` or the VPC CIDR.
+- When `database_security_group_id` is set, an inbound rule on that group admitting the NLB on `port`.
+- A VPC endpoint service on the NLB, with no private DNS name, supported in the provider's region and `unblocked_region`.
+- One allowed-principal entry per role in `allowed_principals`.
+
+## Security model
+
+- The NLB's security group has no inbound rules, and its rules are not evaluated for PrivateLink traffic, so the NLB only takes connections through the endpoint service.
+- Only the roles in `allowed_principals` can create an endpoint to the service. With `auto_accept_connections = false`, each endpoint also needs your acceptance before traffic flows.
+- Outbound, the NLB reaches only `port`, on the database's security group or the configured CIDRs.
+- Unblocked reaches only the targets you register. There is no VPC peering, no route into your VPC and no internet exposure.
+- To cut Unblocked off, reject its endpoint connection. Removing a principal only stops new endpoints, not an accepted one.
 
 ## Finding the target IPs
 
-An NLB forwards to IP addresses, not to RDS endpoints. Resolve each instance's endpoint; the
-endpoint of a private instance resolves to its private IP from anywhere:
+An NLB forwards to IP addresses, not to hostnames. For Amazon RDS and Aurora, resolve each instance's endpoint; the endpoint of a private instance resolves to its private IP from anywhere:
 
 ```bash
 aws rds describe-db-instances --db-instance-identifier <instance-id> \
@@ -101,38 +145,21 @@ Register the reader instances if Unblocked should only read from replicas.
 
 ## Keeping the target IPs current
 
-The NLB sends traffic to fixed IP addresses, but the IP address behind an Aurora instance is
-not fixed. **You own the target group, and you must update it whenever these IPs change.**
-Unblocked cannot see or change it. IPs change when:
+The NLB sends traffic to fixed IP addresses, but the IP address behind an RDS or Aurora instance is not fixed. **You own the target group, and you must update it whenever these IPs change.** Unblocked cannot see or change it. IPs change when:
 
-- **Failover:** the writer fails over, a reader is promoted to writer, and the old writer comes
-  back as a reader. A target group of reader IPs then points at the new writer and misses the
-  new reader.
-- **AWS maintenance:** OS or engine patching, or recovery from a hardware failure, can move an
-  instance to a new host with a new IP.
+- **Failover:** the writer fails over, a reader is promoted to writer, and the old writer comes back as a reader. A target group of reader IPs then points at the new writer and misses the new reader.
+- **AWS maintenance:** OS or engine patching, or recovery from a hardware failure, can move an instance to a new host with a new IP.
 - **Your own changes:** changing an instance class, or adding or removing readers.
 
-When a registered IP goes stale, its health check fails and the NLB stops sending traffic to
-it. Once no target is healthy, Unblocked cannot connect. Check the target group after each of
-these events, or automate the update, for example with an EventBridge rule on RDS events that
-runs a Lambda function to resolve the instance endpoints again and update the target group.
-AWS describes this pattern, with a sample CloudFormation template, in
-[Access Amazon RDS across VPCs using AWS PrivateLink and Network Load Balancer](https://aws.amazon.com/blogs/database/access-amazon-rds-across-vpcs-using-aws-privatelink-and-network-load-balancer/).
-The sample tracks only the writer's IP, so extend it if you register readers.
+When a registered IP goes stale, its health check fails and the NLB stops sending traffic to it. Once no target is healthy, Unblocked cannot connect. Check the target group after each of these events, or automate the update, for example with an EventBridge rule on RDS events that runs a Lambda function to resolve the instance endpoints again and update the target group. AWS describes this pattern, with a sample CloudFormation template, in [Access Amazon RDS across VPCs using AWS PrivateLink and Network Load Balancer](https://aws.amazon.com/blogs/database/access-amazon-rds-across-vpcs-using-aws-privatelink-and-network-load-balancer/). The sample tracks only the writer's IP, so extend it if you register readers.
 
-Do not manage the targets with `aws_lb_target_group_attachment` resources. Terraform would
-re-register stale IPs after a failover and remove targets your automation added.
+The target group does not track its targets in Terraform state, so these changes cause no drift. Do not manage the targets with `aws_lb_target_group_attachment` resources: Terraform would re-register stale IPs after a failover and remove targets your automation added.
 
 ## Connecting Unblocked
 
 1. **Apply the module and register the targets.**
-2. **Give Unblocked** the endpoint service name, your AWS account ID, the region, the port and
-   the database hostname. Unblocked verifies the database's TLS certificate against that
-   hostname, so give the RDS endpoint name (for Aurora, the cluster reader endpoint), not an
-   IP address or a custom DNS name.
-3. **Accept the connection**, unless `auto_accept_connections` is on. Unblocked's endpoint
-   waits in `pendingAcceptance`. Check that it comes from Unblocked's account
-   (`029574882031`), then accept it:
+2. **Give Unblocked** the endpoint service name, your AWS account ID, the region, the port and the database hostname. Unblocked verifies the database's TLS certificate against that hostname, so give the RDS endpoint name (for Aurora, the cluster reader endpoint), not an IP address or a custom DNS name.
+3. **Accept the connection**, unless `auto_accept_connections` is on. Unblocked's endpoint waits in `pendingAcceptance`. Check that its owner is the account in your `allowed_principals` role ARN (`UNBLOCKED_AWS_ACCOUNT_ID`), then accept it:
 
    ```bash
    aws ec2 describe-vpc-endpoint-connections \
@@ -141,15 +168,9 @@ re-register stale IPs after a failover and remove targets your automation added.
      --service-id <endpoint_service_id> --vpc-endpoint-ids <vpce-id>
    ```
 
-To cut Unblocked off, run `reject-vpc-endpoint-connections` on the same endpoint. Removing the
-principal only stops new endpoints, not an accepted one.
-
 ## Regions and Availability Zones
 
-Unblocked connects from `us-west-2`.
+Unblocked connects from `unblocked_region`, `us-west-2` by default.
 
-- **Same region:** Unblocked's endpoint uses the AZs your service offers, matched by AZ ID
-  (for example `usw2-az1`). Put the NLB in at least two AZs.
-- **Another region:** the module adds `us-west-2` to the service's supported regions. AWS
-  bills inter-region data transfer to the sending side. Cross-region PrivateLink is not
-  available in every AZ (for example `use1-az3`), so keep the NLB out of those.
+- **Same region:** Unblocked's endpoint uses the AZs your service offers, matched by AZ ID (for example `usw2-az1`). Put the NLB in at least two AZs.
+- **Another region:** the module adds `unblocked_region` to the service's supported regions. AWS bills inter-region data transfer to the sending side. Cross-region PrivateLink is not available in every AZ (for example `use1-az3`), so keep the NLB out of those.
