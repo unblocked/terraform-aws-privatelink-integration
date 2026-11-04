@@ -36,10 +36,11 @@ module "unblocked_privatelink" {
     "arn:aws:iam::UNBLOCKED_AWS_ACCOUNT_ID:role/UNBLOCKED_ENDPOINT_MANAGER_ROLE_NAME",
   ]
   verification_external_id = "UNBLOCKED_PRIVATELINK_EXTERNAL_ID"
+  verification_role_name   = "orders-db"
 }
 ```
 
-`allowed_principals` and `verification_external_id` have no defaults. Unblocked gives you the role ARN and shows your organization's external ID on its PrivateLink setup page, and both stay visible in your Terraform configuration.
+`allowed_principals`, `verification_external_id` and `verification_role_name` have no defaults, so the Unblocked identity you trust, your external ID and the role Unblocked assumes all stay visible in your Terraform configuration. Unblocked gives you the role ARN and shows your organization's external ID on its PrivateLink setup page. You choose the verification role's name: the module prefixes it with `UnblockedPrivateLink-`, so `orders-db` creates `UnblockedPrivateLink-orders-db`. A name that already starts with `UnblockedPrivateLink` is used as is.
 
 Then register the target IPs, as described in [Finding the target IPs](#finding-the-target-ips):
 
@@ -60,12 +61,12 @@ If your database's security group is managed with inline `ingress` blocks on an 
 | `subnet_ids` | Private subnets for the NLB, one per Availability Zone. The endpoint service is offered in exactly these AZs. | `list(string)` | n/a | yes |
 | `allowed_principals` | Non-empty list of IAM role ARNs allowed to create endpoints to the service: the endpoint-manager role Unblocked gives you. | `list(string)` | n/a | yes |
 | `verification_external_id` | External ID shown on Unblocked's PrivateLink setup page: `unblocked_privatelink_` and 32 hexadecimal characters. The verification role requires it. | `string` | n/a | yes |
+| `verification_role_name` | Name of the role Unblocked assumes to verify that you own the endpoint service. Prefixed with `UnblockedPrivateLink-` unless it already starts with `UnblockedPrivateLink`; the full name must be at most 64 characters of letters, digits and `+=,.@_-`. Use a different name for each instance of the module in an account. | `string` | n/a | yes |
 | `port` | Port the database listens on, and the port the NLB exposes. | `number` | `5432` | no |
 | `database_security_group_id` | Security group of the database. When set, the NLB may reach only this group on the port, and the module adds an inbound rule to it admitting the NLB. | `string` | `null` | no |
 | `target_cidr_blocks` | CIDR blocks the NLB may reach on the port when `database_security_group_id` is unset. Empty means the VPC's primary CIDR block. | `list(string)` | `[]` | no |
 | `unblocked_region` | Region Unblocked connects from. Added to the service's supported regions when it differs from the provider's region. | `string` | `"us-west-2"` | no |
 | `auto_accept_connections` | Accept endpoint connections from the allowed principals automatically. When `false`, you accept each connection before traffic flows. | `bool` | `false` | no |
-| `verification_role_name` | Name of the role Unblocked assumes to verify that you own the endpoint service. Must start with `UnblockedPrivateLink`. The default gives each instance of the module its own role. | `string` | `"UnblockedPrivateLink-<name>"` | no |
 | `tags` | Tags for every resource. | `map(string)` | `{}` | no |
 
 ## Outputs
@@ -132,7 +133,7 @@ Depending on the inputs, the module creates:
 - When `database_security_group_id` is set, an inbound rule on that group admitting the NLB on `port`.
 - A VPC endpoint service on the NLB, with no private DNS name, supported in the provider's region and `unblocked_region`.
 - One allowed-principal entry per role in `allowed_principals`.
-- A verification role, `UnblockedPrivateLink-<name>` unless `verification_role_name` is set, that only the roles in `allowed_principals` can assume, and only with `verification_external_id`. Its inline policy allows `ec2:DescribeVpcEndpointServiceConfigurations` and `iam:GetRole` on itself, nothing else.
+- A verification role named after `verification_role_name`, with the `UnblockedPrivateLink-` prefix, that only the roles in `allowed_principals` can assume, and only with `verification_external_id`. Its inline policy allows `ec2:DescribeVpcEndpointServiceConfigurations` and `iam:GetRole` on itself, nothing else.
 
 ## Security model
 
