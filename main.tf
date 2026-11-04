@@ -9,6 +9,7 @@ data "aws_vpc" "this" {
 locals {
   use_database_security_group = var.database_security_group_id != null
   target_cidr_blocks          = local.use_database_security_group ? [] : (length(var.target_cidr_blocks) > 0 ? var.target_cidr_blocks : [data.aws_vpc.this.cidr_block])
+  verification_role_name      = coalesce(var.verification_role_name, "UnblockedPrivateLink-${var.name}")
 }
 
 resource "aws_security_group" "nlb" {
@@ -145,12 +146,12 @@ data "aws_iam_policy_document" "verification" {
   statement {
     sid       = "ReadOwnTrustPolicy"
     actions   = ["iam:GetRole"]
-    resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${var.verification_role_name}"]
+    resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.verification_role_name}"]
   }
 }
 
 resource "aws_iam_role" "verification" {
-  name                 = var.verification_role_name
+  name                 = local.verification_role_name
   description          = "Lets Unblocked verify that this account owns the ${var.name} endpoint service"
   assume_role_policy   = data.aws_iam_policy_document.verification_assume.json
   max_session_duration = 3600

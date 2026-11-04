@@ -65,7 +65,7 @@ If your database's security group is managed with inline `ingress` blocks on an 
 | `target_cidr_blocks` | CIDR blocks the NLB may reach on the port when `database_security_group_id` is unset. Empty means the VPC's primary CIDR block. | `list(string)` | `[]` | no |
 | `unblocked_region` | Region Unblocked connects from. Added to the service's supported regions when it differs from the provider's region. | `string` | `"us-west-2"` | no |
 | `auto_accept_connections` | Accept endpoint connections from the allowed principals automatically. When `false`, you accept each connection before traffic flows. | `bool` | `false` | no |
-| `verification_role_name` | Name of the role Unblocked assumes to verify that you own the endpoint service. Must start with `UnblockedPrivateLink`. | `string` | `"UnblockedPrivateLinkVerification"` | no |
+| `verification_role_name` | Name of the role Unblocked assumes to verify that you own the endpoint service. Must start with `UnblockedPrivateLink`. The default gives each instance of the module its own role. | `string` | `"UnblockedPrivateLink-<name>"` | no |
 | `tags` | Tags for every resource. | `map(string)` | `{}` | no |
 
 ## Outputs
@@ -132,7 +132,7 @@ Depending on the inputs, the module creates:
 - When `database_security_group_id` is set, an inbound rule on that group admitting the NLB on `port`.
 - A VPC endpoint service on the NLB, with no private DNS name, supported in the provider's region and `unblocked_region`.
 - One allowed-principal entry per role in `allowed_principals`.
-- A verification role named `verification_role_name` that only the roles in `allowed_principals` can assume, and only with `verification_external_id`. Its inline policy allows `ec2:DescribeVpcEndpointServiceConfigurations` and `iam:GetRole` on itself, nothing else.
+- A verification role, `UnblockedPrivateLink-<name>` unless `verification_role_name` is set, that only the roles in `allowed_principals` can assume, and only with `verification_external_id`. Its inline policy allows `ec2:DescribeVpcEndpointServiceConfigurations` and `iam:GetRole` on itself, nothing else.
 
 ## Security model
 
@@ -169,9 +169,10 @@ The target group does not track its targets in Terraform state, so these changes
 
 ## Connecting Unblocked
 
-1. **Apply the module and register the targets.**
-2. **Give Unblocked** the endpoint service name, your AWS account ID, the verification role ARN, the region, the port and the database hostname. Unblocked verifies the database's TLS certificate against that hostname, so give the RDS endpoint name (for Aurora, the cluster reader endpoint), not an IP address or a custom DNS name.
-3. **Accept the connection**, unless `auto_accept_connections` is on. Unblocked's endpoint waits in `pendingAcceptance`. Check that its owner is the account in your `allowed_principals` role ARN (`UNBLOCKED_AWS_ACCOUNT_ID`), then accept it:
+1. **Get your external ID.** Start the Aurora PostgreSQL PrivateLink setup in Unblocked and copy the external ID it shows into `verification_external_id`.
+2. **Apply the module and register the targets.**
+3. **Give Unblocked** the endpoint service name, your AWS account ID, the verification role ARN, the region, the port and the database hostname. Unblocked verifies the database's TLS certificate against that hostname, so give the RDS endpoint name (for Aurora, the cluster reader endpoint), not an IP address or a custom DNS name.
+4. **Accept the connection**, unless `auto_accept_connections` is on. Unblocked's endpoint waits in `pendingAcceptance`. Check that its owner is the account in your `allowed_principals` role ARN (`UNBLOCKED_AWS_ACCOUNT_ID`), then accept it:
 
    ```bash
    aws ec2 describe-vpc-endpoint-connections \

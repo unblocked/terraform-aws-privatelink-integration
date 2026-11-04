@@ -62,12 +62,12 @@ variable "verification_external_id" {
 }
 
 variable "verification_role_name" {
-  description = "Name of the role Unblocked assumes to verify that you own the endpoint service. It must start with UnblockedPrivateLink."
+  description = "Name of the role Unblocked assumes to verify that you own the endpoint service. It must start with UnblockedPrivateLink. Defaults to UnblockedPrivateLink-<name>, so several instances of the module can share an account."
   type        = string
-  default     = "UnblockedPrivateLinkVerification"
+  default     = null
 
   validation {
-    condition     = can(regex("^UnblockedPrivateLink[A-Za-z0-9+=,.@_-]{0,44}$", var.verification_role_name))
+    condition     = var.verification_role_name == null || can(regex("^UnblockedPrivateLink[A-Za-z0-9+=,.@_-]{0,44}$", var.verification_role_name))
     error_message = "verification_role_name must start with UnblockedPrivateLink and be at most 64 characters of letters, digits and +=,.@_-."
   }
 }
