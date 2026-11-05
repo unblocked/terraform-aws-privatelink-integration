@@ -1,6 +1,6 @@
 # Terraform AWS PrivateLink integration
 
-This module offers a database or other TCP service in your VPC to Unblocked through an AWS PrivateLink endpoint service. Unblocked reaches only the targets you register, through an endpoint created by the IAM role you allow. There is no peering, no internet exposure and no route into your VPC.
+This module connects supported services in your VPC, such as Amazon Aurora, to Unblocked through an AWS PrivateLink endpoint service. Unblocked reaches only the targets you register, through an endpoint created by the IAM role you allow. There is no peering, no internet exposure and no route into your VPC.
 
 ## Requirements
 
