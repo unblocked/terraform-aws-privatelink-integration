@@ -24,7 +24,7 @@ The module inherits the caller's AWS provider configuration. It does not configu
 Pin the module to a release tag when consuming it from GitHub:
 
 ```hcl
-module "unblocked_privatelink" {
+module "unblocked_privatelink_connection" {
   source = "git::https://github.com/unblocked/terraform-aws-privatelink-integration.git?ref=v0.1.0"
 
   name                       = "unblocked-privatelink"
@@ -88,27 +88,27 @@ Terraform does not automatically promote a child module's outputs to the root mo
 
 ```hcl
 output "unblocked_endpoint_service_name" {
-  value       = module.unblocked_privatelink.endpoint_service_name
+  value       = module.unblocked_privatelink_connection.endpoint_service_name
   description = "Endpoint service name to provide to Unblocked."
 }
 
 output "unblocked_owner_account_id" {
-  value       = module.unblocked_privatelink.owner_account_id
+  value       = module.unblocked_privatelink_connection.owner_account_id
   description = "AWS account ID to provide to Unblocked."
 }
 
 output "unblocked_port" {
-  value       = module.unblocked_privatelink.port
+  value       = module.unblocked_privatelink_connection.port
   description = "Port to provide to Unblocked."
 }
 
 output "unblocked_verification_role_arn" {
-  value       = module.unblocked_privatelink.verification_role_arn
+  value       = module.unblocked_privatelink_connection.verification_role_arn
   description = "Verification role ARN to provide to Unblocked."
 }
 
 output "unblocked_target_group_arn" {
-  value       = module.unblocked_privatelink.target_group_arn
+  value       = module.unblocked_privatelink_connection.target_group_arn
   description = "Target group to register the target IPs in."
 }
 ```
