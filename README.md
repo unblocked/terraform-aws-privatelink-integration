@@ -133,12 +133,12 @@ Depending on the inputs, the module creates:
 - When `database_security_group_id` is set, an inbound rule on that group admitting the NLB on `port`.
 - A VPC endpoint service on the NLB, with no private DNS name, supported in the provider's region and `unblocked_region`.
 - One allowed-principal entry per role in `allowed_principals`.
-- A verification role named after `verification_role_name`, with the `UnblockedPrivateLink-` prefix, that only the roles in `allowed_principals` can assume, and only with `verification_external_id`. Its inline policy allows `ec2:DescribeVpcEndpointServiceConfigurations` and `iam:GetRole` on itself, nothing else.
+- A verification role named after `verification_role_name`, with the `UnblockedPrivateLink-` prefix, that only the roles in `allowed_principals` can assume, and only with `verification_external_id`. Its inline policy allows `ec2:DescribeVpcEndpointServicePermissions` on this endpoint service and `iam:GetRole` on itself, nothing else.
 
 ## Security model
 
 - The NLB's security group has no inbound rules, and its rules are not evaluated for PrivateLink traffic, so the NLB only takes connections through the endpoint service.
-- Every Unblocked customer allows the same Unblocked role, so before creating an endpoint Unblocked assumes the verification role with your organization's external ID. It checks that the role requires exactly that ID and that it sees the endpoint service from inside your account. Another Unblocked organization cannot pass this check, so it cannot connect to your service even if it knows the service name.
+- Every Unblocked customer allows the same Unblocked role, so before creating an endpoint Unblocked assumes the verification role with your organization's external ID. It checks that the role requires exactly that ID and that it can read the endpoint service's allowed principals, which only the service's owner can do. The role's EC2 permission names this one endpoint service, so Unblocked cannot see any other endpoint service in your account. Another Unblocked organization cannot pass this check, so it cannot connect to your service even if it knows the service name.
 - Only the roles in `allowed_principals` can create an endpoint to the service. With `auto_accept_connections = false`, each endpoint also needs your acceptance before traffic flows.
 - Outbound, the NLB reaches only `port`, on the database's security group or the configured CIDRs.
 - Unblocked reaches only the targets you register. There is no VPC peering, no route into your VPC and no internet exposure.

@@ -138,9 +138,9 @@ data "aws_iam_policy_document" "verification_assume" {
 
 data "aws_iam_policy_document" "verification" {
   statement {
-    sid       = "DescribeEndpointServices"
-    actions   = ["ec2:DescribeVpcEndpointServiceConfigurations"]
-    resources = ["*"]
+    sid       = "ReadOwnEndpointService"
+    actions   = ["ec2:DescribeVpcEndpointServicePermissions"]
+    resources = [aws_vpc_endpoint_service.this.arn]
   }
 
   statement {
